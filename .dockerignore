@@ -1,0 +1,10 @@
+data/
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+scraper/chunks/
+scraper/out/
+scraper/*.json
+!scraper/package.json
+!scraper/package-lock.json

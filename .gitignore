@@ -1,0 +1,14 @@
+# secrets — never commit real credentials
+.env
+.env.*
+!*.example
+
+# python bytecode / caches (runtime, not source)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# runtime cache state (SQLite db, wal/shm) — never commit
+data/
+
+.report/

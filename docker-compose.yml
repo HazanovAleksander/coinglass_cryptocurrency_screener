@@ -1,0 +1,24 @@
+services:
+  dashboard:
+    build: .
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/srv/data
+      - ./.env:/srv/.env:ro
+    environment:
+      - CG_FETCH_LIMIT=4500
+      - CG_STALE_DAYS=1
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - CG_SESSION_SECRET=${CG_SESSION_SECRET:-coinglass-dashboard-dev-secret}
+      - CG_GOOGLE_REDIRECT_URI=${CG_GOOGLE_REDIRECT_URI:-}
+    restart: unless-stopped
+    shm_size: 1gb
+
+  test:
+    build: .
+    profiles: ["test"]
+    command: ["python3", "-m", "pytest", "-q", "app/tests"]
+    environment:
+      - CG_DB_DIR=/tmp/test-sqlite

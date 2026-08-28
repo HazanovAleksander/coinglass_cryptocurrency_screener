@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoinGlass Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css?v=13">
+</head>
+<body>
+  <header>
+    <h1>CoinGlass Dashboard</h1>
+    <div class="controls">
+      <span class="view-tabs" id="view-tabs">
+        <button id="tab-dashboard" class="tab-btn active" type="button">Дашборд</button>
+        <button id="tab-analytics" class="tab-btn" type="button">Анализ</button>
+      </span>
+      <span class="dash-only">
+        <label for="coin-select">Монета:</label>
+        <select id="coin-select"></select>
+      </span>
+      <span class="date-range">
+        <label for="date-from">с:</label>
+        <input id="date-from" type="date">
+        <label for="date-to">по:</label>
+        <input id="date-to" type="date">
+        <span class="presets">
+          <button data-preset="ytd" type="button" class="preset-btn">С начала года</button>
+          <button data-preset="1m" type="button" class="preset-btn">За месяц</button>
+          <button data-preset="1y" type="button" class="preset-btn">За год</button>
+          <button data-preset="2y" type="button" class="preset-btn">За 2 года</button>
+          <button data-preset="all" type="button" class="preset-btn">За все время</button>
+        </span>
+      </span>
+      <span class="dash-only">
+        <button id="refresh-btn">Обновить данные</button>
+        <input id="fetch-limit" type="number" min="10" step="10" value="4500" title="Свечей за один запрос (макс. истории)">
+        <label for="layout-select">Расположение:</label>
+        <select id="layout-select">
+          <option value="layout-2" selected>2 колонки</option>
+          <option value="layout-1">1 колонка</option>
+          <option value="layout-3">3 колонки</option>
+        </select>
+        <button id="layout-reset" type="button" class="link-btn" title="Вернуть порядок графиков по умолчанию">сбросить расположение</button>
+        <span class="export-label">Экспорт:</span>
+        <button class="export-btn" data-fmt="csv">CSV</button>
+        <button class="export-btn" data-fmt="xlsx">XLSX</button>
+        <button class="export-btn" data-fmt="xls">XLS</button>
+        <button class="export-btn" data-fmt="gsheet">Google Sheets</button>
+      </span>
+    </div>
+    <div id="status-wrap" class="hidden">
+      <div id="status-text"></div>
+      <div class="bar"><div id="status-bar"></div></div>
+    </div>
+  </header>
+  <main class="layout-2">
+    <div class="chart-container" id="cc-funding">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="funding" checked disabled> в экспорт</label>
+      <div id="chart-funding" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container" id="cc-oi">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Добавить OI по биржам в экспорт"><input type="checkbox" class="chart-export" data-chart="oi"> в экспорт</label>
+      <div id="chart-oi" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container" id="cc-vol-spot">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="vol-spot" checked disabled> в экспорт</label>
+      <div id="chart-vol-spot" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container" id="cc-vol-fut">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="vol-fut" checked disabled> в экспорт</label>
+      <div id="chart-vol-fut" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container" id="cc-cvd-spot">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="cvd-spot" checked disabled> в экспорт</label>
+      <div id="chart-cvd-spot" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container" id="cc-cvd-fut">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="cvd-fut" checked disabled> в экспорт</label>
+      <div id="chart-cvd-fut" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container wide" id="cc-price">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Данные уже входят в экспорт"><input type="checkbox" class="chart-export" data-chart="price" checked disabled> в экспорт</label>
+      <span class="overlay-pick" title="Наложить до 5 монет: цены — Δ% от начала диапазона, фандинг — абсолютные % (клик по ячейке в разделе «Анализ» тоже сюда)">
+        <span>оверлей:</span>
+        <select id="overlay-coin"><option value="">+ добавить…</option></select>
+        <span id="overlay-chips"></span>
+        <button id="overlay-reset" type="button" class="link-btn" hidden>✕ сброс</button>
+      </span>
+      <div id="chart-price" class="chart"></div>
+      <a class="src-link" target="_blank" rel="noopener">↗</a>
+    </div>
+    <div class="chart-container wide" id="cc-vol-history">
+      <span class="chart-grip" title="Перетащить">⠿</span>
+      <label class="export-chk" title="Добавить RV (историческая волатильность) в экспорт"><input type="checkbox" class="chart-export" data-chart="vol-history"> в экспорт</label>
+      <div id="chart-vol-history" class="chart"></div>
+    </div>
+  </main>
+  <section id="analytics-view" class="hidden">
+    <div class="analytics-controls">
+      <label>Метрика:
+        <select id="an-metric">
+          <option value="returns" selected>Доходности (лог.)</option>
+          <option value="rv">Волатильность (RV 7д)</option>
+          <option value="funding">Фандинг</option>
+        </select>
+      </label>
+      <label>Режим:
+        <select id="an-mode">
+          <option value="corr" selected>Корреляция</option>
+          <option value="cov">Ковариация (доходности)</option>
+        </select>
+      </label>
+      <button id="an-load-top20" type="button" title="Последовательно обновить данные всех монет топ-20">Загрузить топ-20</button>
+      <span id="an-info"></span>
+    </div>
+    <div id="an-heatmap"></div>
+    <div class="an-table-wrap">
+      <table id="an-table"></table>
+    </div>
+    <p class="an-hint">Клик по ячейке — наложить монету из строки на монету из столбца в дашборде (нормировано в начале диапазона).</p>
+  </section>
+  <footer>
+    <span id="meta-info"></span>
+  </footer>
+  <script src="/static/app.js?v=45"></script>
+</body>
+</html>
