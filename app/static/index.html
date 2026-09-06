@@ -6,7 +6,7 @@
   <title>CoinGlass Dashboard</title>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=14">
+  <link rel="stylesheet" href="/static/styles.css?v=15">
 </head>
 <body>
   <header>
@@ -125,10 +125,21 @@
           <option value="cov">Ковариация (доходности)</option>
         </select>
       </label>
+      <label>Подсветка пар:
+        <select id="an-hl">
+          <option value="ge" selected>ρ ≥</option>
+          <option value="le">ρ ≤</option>
+          <option value="off">выкл</option>
+        </select>
+      </label>
+      <label>Порог ρ:
+        <input id="an-hl-th" type="number" step="0.05" min="-1" max="1" value="0.8">
+      </label>
       <button id="an-load-top20" type="button" title="Последовательно обновить данные всех монет топ-20">Загрузить топ-20</button>
       <span id="an-info"></span>
     </div>
     <div id="an-heatmap"></div>
+    <div id="an-pairs"></div>
     <div class="an-table-wrap">
       <table id="an-table"></table>
     </div>
@@ -137,6 +148,6 @@
   <footer>
     <span id="meta-info"></span>
   </footer>
-  <script src="/static/app.js?v=46"></script>
+  <script src="/static/app.js?v=47"></script>
 </body>
 </html>

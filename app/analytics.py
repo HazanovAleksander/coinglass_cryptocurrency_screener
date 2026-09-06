@@ -143,9 +143,8 @@ def build_report(
                     corr["funding"][i][j] = corr["funding"][j][i] = pearson(fa, fb)
 
     base_rets = rets.get(base)
-    base_idx = symbols.index(base) if base in symbols else None
     stats = []
-    for i, s in enumerate(symbols):
+    for s in symbols:
         cl = closes[s]
         rv = rvs[s].values()
         fund = funding.get(s, {}).values()
@@ -164,7 +163,6 @@ def build_report(
             "funding_mean": (sum(fund) / len(fund) * 100) if fund else None,
             "funding_last": (sorted(funding[s].items())[-1][1] * 100) if funding.get(s) else None,
             "beta": 1.0 if s == base and base_rets is not None else b,
-            "corr_base": corr["returns"][base_idx][i] if base_idx is not None else None,
         })
 
     return {

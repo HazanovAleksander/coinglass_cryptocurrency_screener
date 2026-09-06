@@ -272,11 +272,11 @@ def cmd_analytics(args) -> int:
         return 0
     _emit_table(
         ["symbol", "days", "from", "to", "rv_mean", "rv_last",
-         "funding_mean", "funding_last", "beta", "corr"],
+         "funding_mean", "funding_last", "beta"],
         [[s["symbol"], s["days"], _iso(s["from_ts"]), _iso(s["to_ts"]),
           _fmt_pct(s["rv_mean"]), _fmt_pct(s["rv_last"]),
           _fmt_pct(s["funding_mean"]), _fmt_pct(s["funding_last"]),
-          _fmt_cell(s["beta"]), _fmt_cell(s["corr_base"])] for s in report["stats"]])
+          _fmt_cell(s["beta"])] for s in report["stats"]])
     if report["missing"]:
         print(f"\nmissing (no cached prices): {', '.join(report['missing'])}")
     for title, key in (("corr: returns", "returns"), ("corr: rv", "rv"),

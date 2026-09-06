@@ -1031,9 +1031,6 @@ def test_analytics_api(client):
     assert st["BTC"]["beta"] == 1.0
     assert st["ETH"]["beta"] == pytest.approx(2.0)
     assert st["DOGE"]["beta"] == pytest.approx(-1.0)
-    assert st["BTC"]["corr_base"] == pytest.approx(1.0)
-    assert st["ETH"]["corr_base"] == pytest.approx(1.0)
-    assert st["DOGE"]["corr_base"] == pytest.approx(-1.0)
     assert st["BTC"]["days"] == AN_N
     assert st["BTC"]["funding_mean"] == pytest.approx(
         100 * statistics.mean(0.001 + 0.0001 * (i % 5) for i in range(AN_N)))

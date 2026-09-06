@@ -965,6 +965,52 @@ function fmtCell(v, mode) {
   return mode === "cov" ? v.toExponential(1) : v.toFixed(2);
 }
 
+function highlightPairs(d, metric) {
+  const hl = $("an-hl").value;
+  const th = parseFloat($("an-hl-th").value);
+  if (hl === "off" || !Number.isFinite(th)) return [];
+  const z = d.corr[metric];
+  const pairs = [];
+  for (let i = 0; i < z.length; i++) {
+    for (let j = i + 1; j < z.length; j++) {
+      const v = z[i][j];
+      if (v == null || !Number.isFinite(v)) continue;
+      if (hl === "ge" ? v >= th : v <= th) pairs.push({ i, j, v });
+    }
+  }
+  return pairs;
+}
+
+function pairShapes(pairs) {
+  const color = $("an-hl").value === "le" ? "#f85149" : "#3fb950";
+  const shapes = [];
+  for (const { i, j } of pairs) {
+    for (const [a, b] of [[j, i], [i, j]]) {
+      shapes.push({
+        type: "rect", xref: "x", yref: "y", layer: "above",
+        x0: a - 0.5, x1: a + 0.5, y0: b - 0.5, y1: b + 0.5,
+        line: { color, width: 2 },
+      });
+    }
+  }
+  return shapes;
+}
+
+function updatePairsInfo(pairs, syms) {
+  const el = $("an-pairs");
+  const hl = $("an-hl").value;
+  const th = $("an-hl-th").value;
+  if (hl === "off") { el.textContent = ""; return; }
+  if (!pairs.length) {
+    el.textContent = `Нет пар с корреляцией ${hl === "ge" ? "≥" : "≤"} ${th} для выбранной метрики`;
+    return;
+  }
+  const sorted = [...pairs].sort((a, b) => (hl === "ge" ? b.v - a.v : a.v - b.v));
+  const list = sorted.slice(0, 8).map((p) => `${syms[p.i]}↔${syms[p.j]} ${p.v.toFixed(2)}`);
+  el.textContent = `Подсвечено пар: ${pairs.length}` +
+    (pairs.length > 8 ? ` (топ-8): ${list.join(", ")} …` : `: ${list.join(", ")}`);
+}
+
 function renderAnalytics() {
   const d = analyticsData;
   if (!d) return;
@@ -975,6 +1021,7 @@ function renderAnalytics() {
   const el = $("an-heatmap");
   if (!syms.length) {
     el.textContent = "Нет закэшированных данных — нажмите «Загрузить топ-20»";
+    $("an-pairs").textContent = "";
     renderAnTable(d);
     renderAnInfo(d);
     return;
@@ -982,10 +1029,14 @@ function renderAnalytics() {
   const cells = z.flat().filter((v) => v != null && Number.isFinite(v));
   if (!cells.length) {
     el.textContent = "Недостаточно пересечений данных для выбранной метрики — расширьте диапазон или загрузите топ-20";
+    $("an-pairs").textContent = "";
     renderAnTable(d);
     renderAnInfo(d);
     return;
   }
+  const pairs = highlightPairs(d, metric);
+  $("an-hl-th").disabled = $("an-hl").value === "off";
+  $("an-pairs").textContent = "";
   const lo = mode === "corr" ? -1 : Math.min(...cells);
   let hi = mode === "corr" ? 1 : Math.max(...cells);
   if (hi <= lo) hi = lo + 1e-9;
@@ -1022,7 +1073,9 @@ function renderAnalytics() {
     xaxis: { tickangle: -45, gridcolor: "transparent", fixedrange: true },
     yaxis: { autorange: "reversed", gridcolor: "transparent", fixedrange: true },
     annotations,
+    shapes: pairShapes(pairs),
   }, PLOT_CFG);
+  updatePairsInfo(pairs, syms);
   if (!el.dataset.clickWired) {
     el.dataset.clickWired = "1";
     el.on("plotly_click", (ev) => {
@@ -1046,13 +1099,7 @@ function renderAnInfo(d) {
 function renderAnTable(d) {
   const tbl = $("an-table");
   const fmt = (v, suf = "") => (v == null ? "—" : v.toFixed(2) + suf);
-  const rowCls = (s) => {
-    if (d.base === s.symbol || s.corr_base == null) return "";
-    if (s.corr_base >= 0.9) return ` class="an-row-high"`;
-    if (s.corr_base < 0.3) return ` class="an-row-low"`;
-    return "";
-  };
-  const rows = d.stats.map((s) => `<tr${rowCls(s)}>
+  const rows = d.stats.map((s) => `<tr>
       <td>${s.symbol}${d.base === s.symbol ? " ★" : ""}</td>
       <td>${s.days}</td>
       <td>${s.from_ts ? new Date(s.from_ts * 1000).toISOString().slice(0, 10) : "—"}</td>
@@ -1062,13 +1109,12 @@ function renderAnTable(d) {
       <td>${fmt(s.funding_mean, "%/д")}</td>
       <td>${fmt(s.funding_last, "%/д")}</td>
       <td>${s.beta == null ? "—" : s.beta.toFixed(2)}</td>
-      <td>${s.corr_base == null ? "—" : s.corr_base.toFixed(2)}</td>
     </tr>`).join("");
   tbl.innerHTML = `<thead><tr>
       <th>Монета</th><th>Дней</th><th>С</th><th>По</th>
       <th>RV средн.</th><th>RV последн.</th>
       <th>Фандинг средн.</th><th>Фандинг последн.</th>
-      <th>β к ${d.base || "BTC"}</th><th>ρ к ${d.base || "BTC"}</th>
+      <th>β к ${d.base || "BTC"}</th>
     </tr></thead><tbody>${rows}</tbody>`;
 }
 
@@ -1169,6 +1215,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("overlay-reset").addEventListener("click", resetOverlays);
   $("an-metric").addEventListener("change", () => { saveState(); renderAnalytics(); });
   $("an-mode").addEventListener("change", () => { saveState(); renderAnalytics(); });
+  $("an-hl").addEventListener("change", (e) => {
+    if (e.target.value !== "off") $("an-hl-th").value = e.target.value === "le" ? "0.2" : "0.8";
+    saveState();
+    renderAnalytics();
+  });
+  $("an-hl-th").addEventListener("input", renderAnalytics);
   $("an-load-top20").addEventListener("click", loadTop20);
 
   setView(currentView);
