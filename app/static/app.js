@@ -397,7 +397,8 @@ function pollJob(jobId, symbol) {
       funding: "funding rate", oi_agg: "открытый интерес (агрегат)",
       oi_by_exchange_hourly: "OI по биржам (час)", oi_by_exchange_daily: "OI по биржам (день)",
       fut_buysell: "объёмы фьючерсы", spot_buysell: "объёмы спот",
-      spot_price: "котировки спот", done: "готово",
+      spot_price: "котировки спот", spot_backfill: "бэкфилл спота (LBMA/Bybit)",
+      done: "готово",
     };
     setStatus("Загрузка: " + (stageNames[j.stage] || j.stage), frac, false);
     if (j.state === "done") {

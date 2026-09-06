@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import store
+from . import backfill, store
 
 SCRAPER_DIR = Path(os.environ.get("CG_SCRAPER_DIR", Path(__file__).resolve().parent.parent / "scraper"))
 NODE_BIN = os.environ.get("CG_NODE_BIN", "node")
@@ -35,7 +35,8 @@ STABLECOIN_SYMBOLS = {
     "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDP", "PYUSD",
     "USDS", "USDE", "USD1", "FRAX", "USDD",
 }
-EXTRA_SYMBOLS = ["PEPE"]
+EXTRA_SYMBOLS = ["PEPE", "XAU", "XAG"]
+EXTRA_NAMES = {"XAU": "Gold", "XAG": "Silver"}
 
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
@@ -275,6 +276,8 @@ def refresh_symbol_async(symbol: str, force: bool = False, timeframe: str = "d1"
         try:
             bundle = _run_scraper(symbol, FETCH_LIMIT, job_id, timeframe)
             counts = _normalize_bundle(symbol, bundle, timeframe)
+            _job_update(job_id, stage="spot_backfill", current=1, total=2)
+            counts.update(backfill.backfill_spot(symbol))
             store.set_meta(f"last_fetch:{symbol}", {
                 "ts": int(time.time()), "counts": counts,
             })
@@ -306,6 +309,8 @@ def refresh_symbol_sync(symbol: str, force: bool = False,
     try:
         bundle = _run_scraper(symbol, FETCH_LIMIT, job_id, "d1", on_progress)
         counts = _normalize_bundle(symbol, bundle, "d1")
+        _job_update(job_id, stage="spot_backfill", current=1, total=2)
+        counts.update(backfill.backfill_spot(symbol))
         store.set_meta(f"last_fetch:{symbol}",
                        {"ts": int(time.time()), "counts": counts})
         _job_update(job_id, state="done", stage="done",
@@ -334,7 +339,8 @@ def _filter_top20(coins: list[dict], limit: int | None = None) -> list[dict]:
             break
     for sym in EXTRA_SYMBOLS:
         if sym not in seen:
-            out.append({"symbol": sym, "name": sym, "market_cap": None, "price": None})
+            out.append({"symbol": sym, "name": EXTRA_NAMES.get(sym, sym),
+                        "market_cap": None, "price": None})
     return out
 
 

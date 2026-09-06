@@ -239,7 +239,7 @@ def test_coins_fallback(client, monkeypatch):
     from app import fetcher
     monkeypatch.setattr(fetcher, "NODE_BIN", "/nonexistent/node")
     coins = fetcher.get_top20(force=True)
-    assert len(coins) == 20
+    assert len(coins) == 22  # top-20 + PEPE + XAU + XAG
     assert coins[0]["symbol"] == "BTC"
 
 
@@ -898,7 +898,7 @@ def test_cli_analytics_json(cache_env, capsys):
     assert cli.main(["analytics", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["symbols"] == ["BTC", "ETH", "DOGE"]
-    assert data["missing"] == ["XRP", "PEPE"]
+    assert data["missing"] == ["XRP", "PEPE", "XAU", "XAG"]
     assert data["base"] == "BTC"
 
 
@@ -1013,7 +1013,7 @@ def test_analytics_api(client):
     assert r.status_code == 200
     b = r.json()
     assert b["symbols"] == ["BTC", "ETH", "DOGE"]
-    assert b["missing"] == ["XRP", "PEPE"]
+    assert b["missing"] == ["XRP", "PEPE", "XAU", "XAG"]
     assert b["base"] == "BTC"
     assert b["overlap"][0][1] == AN_N - 1 and b["overlap"][1][0] == AN_N - 1
     assert b["corr"]["returns"][0][1] == pytest.approx(1.0)
@@ -1054,7 +1054,7 @@ def test_analytics_empty_universe(client):
     assert r.status_code == 200
     b = r.json()
     assert b["symbols"] == [] and b["stats"] == []
-    assert b["missing"] == ["BTC", "ETH", "DOGE", "XRP", "PEPE"]
+    assert b["missing"] == ["BTC", "ETH", "DOGE", "XRP", "PEPE", "XAU", "XAG"]
 
 
 def test_analytics_invalid_range_422(client):
@@ -1069,7 +1069,94 @@ def test_top20_filters_stables_and_extras(client):
         for s in ("BTC", "WBTC", "USD1", "USDT", "ETH", "PEPE")
     ])
     syms = [c["symbol"] for c in fetcher.get_top20()]
-    assert syms == ["BTC", "ETH", "PEPE"]
+    assert syms == ["BTC", "ETH", "PEPE", "XAU", "XAG"]
     r = client.get("/api/coins")
     assert r.status_code == 200
-    assert [c["symbol"] for c in r.json()["coins"]] == ["BTC", "ETH", "PEPE"]
+    assert [c["symbol"] for c in r.json()["coins"]] == ["BTC", "ETH", "PEPE", "XAU", "XAG"]
+
+
+# ---------------------------------------------------------------- metals backfill
+
+_BACKFILL_LBMA = [
+    {"d": "2019-12-31", "v": [10.0, 8.0, None], "is_cms_locked": 0},  # before 2020
+    {"d": "2024-01-02", "v": [20.0, 16.0, 18.0], "is_cms_locked": 0},
+    {"d": "2024-01-03", "v": [21.0, 16.5, 18.5], "is_cms_locked": 0},
+    {"d": "2024-01-04", "v": [None, 16.6, 18.6], "is_cms_locked": 0},  # no USD fix
+    {"d": "2024-01-05", "v": [22.0, 17.0, 19.0], "is_cms_locked": 0},
+]
+_BACKFILL_INST = {"result": {"list": [{"symbol": "XAGUSDT", "launchTime": 1704067200000}]}
+                  }  # launch 2024-01-01 UTC
+_BACKFILL_KLINES = {"retCode": 0, "result": {"list": [  # newest first
+    ["1704326400000", "30", "31", "29", "30.5", "10", "305.0"],  # 2024-01-04
+    ["1704240000000", "29", "30", "28", "29.5", "11", "324.5"],  # 2024-01-03
+]}}
+
+
+def _mock_backfill_http(monkeypatch, lbma=_BACKFILL_LBMA):
+    from app import backfill
+
+    def fake_get_json(url, params=None):
+        if "lbma" in url:
+            return lbma
+        if "instruments-info" in url:
+            return _BACKFILL_INST
+        return _BACKFILL_KLINES
+
+    monkeypatch.setattr(backfill, "_get_json", fake_get_json)
+
+
+def test_backfill_lbma_perp_merge(client, monkeypatch):
+    from app import backfill, store
+    _mock_backfill_http(monkeypatch)
+    counts = backfill.backfill_spot("XAG")
+    # boundary = first perp day (2024-01-03): LBMA keeps only 2024-01-02
+    assert counts == {"spot_perp": 2, "spot_lbma": 1}
+    pts = dict(store.get_points("XAG", "spot_price_d1"))
+    assert len(pts) == 3
+    jan3 = pts[1704240000]
+    assert (jan3["open"], jan3["close"], jan3["volume"], jan3["src"]) == \
+        (29.0, 29.5, 324.5, "perp")
+    jan2 = pts[1704153600]
+    assert (jan2["open"], jan2["high"], jan2["low"], jan2["close"]) == (20.0,) * 4
+    assert jan2["src"] == "lbma" and jan2["volume"] is None
+    # idempotent: LBMA fills gaps only, perp re-upserts (refreshes) its days
+    counts = backfill.backfill_spot("XAG")
+    assert counts == {"spot_perp": 2, "spot_lbma": 0}
+    assert len(store.get_points("XAG", "spot_price_d1")) == 3
+
+
+def test_backfill_no_perp_lbma_fills_all(client, monkeypatch):
+    from app import backfill, store
+    _mock_backfill_http(monkeypatch)
+
+    def bybit_down(url, params=None):
+        if "kline" in url or "instruments-info" in url:
+            raise RuntimeError("bybit down")
+        return _BACKFILL_LBMA
+
+    monkeypatch.setattr(backfill, "_get_json", bybit_down)
+    counts = backfill.backfill_spot("XAG")
+    assert counts == {"spot_perp": 0, "spot_lbma": 3}
+    pts = dict(store.get_points("XAG", "spot_price_d1"))
+    assert pts[1704412800]["close"] == 22.0  # 2024-01-05 via LBMA
+    # perp recovery replaces LBMA rows on its own days only
+    _mock_backfill_http(monkeypatch)
+    counts = backfill.backfill_spot("XAG")
+    assert counts == {"spot_perp": 2, "spot_lbma": 0}
+    pts = dict(store.get_points("XAG", "spot_price_d1"))
+    assert pts[1704326400]["close"] == 30.5
+    assert pts[1704153600]["close"] == 20.0
+
+
+def test_backfill_skips_non_metals(client):
+    from app import backfill
+    assert backfill.backfill_spot("BTC") == {}
+
+
+def test_top20_includes_metals_with_names(client):
+    from app import fetcher, store
+    store.set_meta("top20", [
+        {"symbol": "BTC", "name": "Bitcoin", "market_cap": None, "price": None}])
+    by = {c["symbol"]: c for c in fetcher.get_top20()}
+    assert by["XAU"]["name"] == "Gold"
+    assert by["XAG"]["name"] == "Silver"
