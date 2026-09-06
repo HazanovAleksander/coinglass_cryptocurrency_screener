@@ -30,6 +30,13 @@ FALLBACK_TOP20 = [
     "BCH", "DOT", "UNI", "PEPE",
 ]
 
+EXCLUDE_SYMBOLS = {"WBTC"}
+STABLECOIN_SYMBOLS = {
+    "USDT", "USDC", "BUSD", "DAI", "TUSD", "FDUSD", "USDP", "PYUSD",
+    "USDS", "USDE", "USD1", "FRAX", "USDD",
+}
+EXTRA_SYMBOLS = ["PEPE"]
+
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
@@ -314,16 +321,34 @@ def refresh_symbol_sync(symbol: str, force: bool = False,
                 "counts": None}
 
 
+def _filter_top20(coins: list[dict], limit: int | None = None) -> list[dict]:
+    seen: set[str] = set()
+    out: list[dict] = []
+    for c in coins:
+        sym = (c.get("symbol") or "").upper()
+        if not sym or sym in seen or sym in EXCLUDE_SYMBOLS or sym in STABLECOIN_SYMBOLS:
+            continue
+        seen.add(sym)
+        out.append(c)
+        if limit and len(out) >= limit:
+            break
+    for sym in EXTRA_SYMBOLS:
+        if sym not in seen:
+            out.append({"symbol": sym, "name": sym, "market_cap": None, "price": None})
+    return out
+
+
 def get_top20(force: bool = False) -> list[dict]:
-    """Top-20 coins by market cap (cached daily). Falls back to static list."""
+    """Top-20 coins by market cap (cached daily), minus wrapped-BTC/stablecoin
+    entries, plus EXTRA_SYMBOLS. Falls back to static list."""
     cached = None if force else store.get_meta("top20", max_age=TOP20_TTL)
     if cached:
-        return cached
+        return _filter_top20(cached)
     try:
         with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
             out_path = tmp.name
         proc = subprocess.run(
-            [NODE_BIN, str(SCRAPER_DIR / "fetch_bundle.js"), "_TOP20", "20", out_path],
+            [NODE_BIN, str(SCRAPER_DIR / "fetch_bundle.js"), "_TOP20", "25", out_path],
             capture_output=True, text=True, timeout=180, cwd=str(SCRAPER_DIR),
         )
         if proc.returncode == 0:
@@ -335,7 +360,8 @@ def get_top20(force: bool = False) -> list[dict]:
                 {"symbol": c.get("symbol"), "name": c.get("coinName") or c.get("symbol"),
                  "market_cap": c.get("marketCap"), "price": c.get("price")}
                 for c in lst if c.get("symbol")
-            ][:20]
+            ]
+            coins = _filter_top20(coins, limit=20)
             if coins:
                 store.set_meta("top20", coins)
                 return coins
@@ -346,5 +372,6 @@ def get_top20(force: bool = False) -> list[dict]:
             os.unlink(out_path)
         except OSError:
             pass
-    return [{"symbol": s, "name": s, "market_cap": None, "price": None}
-            for s in FALLBACK_TOP20]
+    return _filter_top20(
+        [{"symbol": s, "name": s, "market_cap": None, "price": None}
+         for s in FALLBACK_TOP20], limit=20)

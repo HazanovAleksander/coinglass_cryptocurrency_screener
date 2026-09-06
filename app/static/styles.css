@@ -291,6 +291,8 @@ footer {
 }
 #an-table th:first-child, #an-table td:first-child { text-align: left; }
 #an-table tbody tr:hover { background: #202a41; }
+#an-table tbody tr.an-row-high td { background: rgba(63, 185, 80, 0.14); }
+#an-table tbody tr.an-row-low td { background: rgba(248, 81, 73, 0.13); }
 .an-hint { margin: 0; font-size: 12px; opacity: 0.6; }
 @media (max-width: 1100px) {
   main.layout-2, main.layout-1, main.layout-3 { grid-template-columns: 1fr; }

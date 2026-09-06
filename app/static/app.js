@@ -1046,7 +1046,13 @@ function renderAnInfo(d) {
 function renderAnTable(d) {
   const tbl = $("an-table");
   const fmt = (v, suf = "") => (v == null ? "—" : v.toFixed(2) + suf);
-  const rows = d.stats.map((s) => `<tr>
+  const rowCls = (s) => {
+    if (d.base === s.symbol || s.corr_base == null) return "";
+    if (s.corr_base >= 0.9) return ` class="an-row-high"`;
+    if (s.corr_base < 0.3) return ` class="an-row-low"`;
+    return "";
+  };
+  const rows = d.stats.map((s) => `<tr${rowCls(s)}>
       <td>${s.symbol}${d.base === s.symbol ? " ★" : ""}</td>
       <td>${s.days}</td>
       <td>${s.from_ts ? new Date(s.from_ts * 1000).toISOString().slice(0, 10) : "—"}</td>
@@ -1056,12 +1062,13 @@ function renderAnTable(d) {
       <td>${fmt(s.funding_mean, "%/д")}</td>
       <td>${fmt(s.funding_last, "%/д")}</td>
       <td>${s.beta == null ? "—" : s.beta.toFixed(2)}</td>
+      <td>${s.corr_base == null ? "—" : s.corr_base.toFixed(2)}</td>
     </tr>`).join("");
   tbl.innerHTML = `<thead><tr>
       <th>Монета</th><th>Дней</th><th>С</th><th>По</th>
       <th>RV средн.</th><th>RV последн.</th>
       <th>Фандинг средн.</th><th>Фандинг последн.</th>
-      <th>β к ${d.base || "BTC"}</th>
+      <th>β к ${d.base || "BTC"}</th><th>ρ к ${d.base || "BTC"}</th>
     </tr></thead><tbody>${rows}</tbody>`;
 }
 

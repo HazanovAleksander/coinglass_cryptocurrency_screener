@@ -898,7 +898,7 @@ def test_cli_analytics_json(cache_env, capsys):
     assert cli.main(["analytics", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data["symbols"] == ["BTC", "ETH", "DOGE"]
-    assert data["missing"] == ["XRP"]
+    assert data["missing"] == ["XRP", "PEPE"]
     assert data["base"] == "BTC"
 
 
@@ -979,7 +979,7 @@ def _top20_meta():
     from app import store
     store.set_meta("top20", [
         {"symbol": s, "name": s, "market_cap": None, "price": None}
-        for s in ("BTC", "ETH", "DOGE", "XRP")
+        for s in ("BTC", "ETH", "DOGE", "XRP", "WBTC", "USD1", "PEPE")
     ])
 
 
@@ -1013,7 +1013,7 @@ def test_analytics_api(client):
     assert r.status_code == 200
     b = r.json()
     assert b["symbols"] == ["BTC", "ETH", "DOGE"]
-    assert b["missing"] == ["XRP"]
+    assert b["missing"] == ["XRP", "PEPE"]
     assert b["base"] == "BTC"
     assert b["overlap"][0][1] == AN_N - 1 and b["overlap"][1][0] == AN_N - 1
     assert b["corr"]["returns"][0][1] == pytest.approx(1.0)
@@ -1031,6 +1031,9 @@ def test_analytics_api(client):
     assert st["BTC"]["beta"] == 1.0
     assert st["ETH"]["beta"] == pytest.approx(2.0)
     assert st["DOGE"]["beta"] == pytest.approx(-1.0)
+    assert st["BTC"]["corr_base"] == pytest.approx(1.0)
+    assert st["ETH"]["corr_base"] == pytest.approx(1.0)
+    assert st["DOGE"]["corr_base"] == pytest.approx(-1.0)
     assert st["BTC"]["days"] == AN_N
     assert st["BTC"]["funding_mean"] == pytest.approx(
         100 * statistics.mean(0.001 + 0.0001 * (i % 5) for i in range(AN_N)))
@@ -1054,9 +1057,22 @@ def test_analytics_empty_universe(client):
     assert r.status_code == 200
     b = r.json()
     assert b["symbols"] == [] and b["stats"] == []
-    assert b["missing"] == ["BTC", "ETH", "DOGE", "XRP"]
+    assert b["missing"] == ["BTC", "ETH", "DOGE", "XRP", "PEPE"]
 
 
 def test_analytics_invalid_range_422(client):
     r = client.get(f"/api/analytics/correlations?from_ts={BASE_TS + 1}&to_ts={BASE_TS}")
     assert r.status_code == 422
+
+
+def test_top20_filters_stables_and_extras(client):
+    from app import fetcher, store
+    store.set_meta("top20", [
+        {"symbol": s, "name": s, "market_cap": None, "price": None}
+        for s in ("BTC", "WBTC", "USD1", "USDT", "ETH", "PEPE")
+    ])
+    syms = [c["symbol"] for c in fetcher.get_top20()]
+    assert syms == ["BTC", "ETH", "PEPE"]
+    r = client.get("/api/coins")
+    assert r.status_code == 200
+    assert [c["symbol"] for c in r.json()["coins"]] == ["BTC", "ETH", "PEPE"]
