@@ -40,6 +40,7 @@ let currentView = "dashboard";
 let overlaySymbols = [];
 let analyticsData = null;
 let analyticsKey = null;
+let anHighlight = "off";
 const _overlayFetched = new Set();
 
 const MAX_OVERLAYS = 5;
@@ -966,23 +967,22 @@ function fmtCell(v, mode) {
 }
 
 function highlightPairs(d, metric) {
-  const hl = $("an-hl").value;
-  const th = parseFloat($("an-hl-th").value);
-  if (hl === "off" || !Number.isFinite(th)) return [];
+  if (anHighlight === "off") return [];
+  const th = anHighlight === "high" ? 0.7 : 0.3;
   const z = d.corr[metric];
   const pairs = [];
   for (let i = 0; i < z.length; i++) {
     for (let j = i + 1; j < z.length; j++) {
       const v = z[i][j];
       if (v == null || !Number.isFinite(v)) continue;
-      if (hl === "ge" ? v >= th : v <= th) pairs.push({ i, j, v });
+      if (anHighlight === "high" ? v >= th : v <= th) pairs.push({ i, j, v });
     }
   }
   return pairs;
 }
 
 function pairShapes(pairs) {
-  const color = $("an-hl").value === "le" ? "#f85149" : "#3fb950";
+  const color = anHighlight === "low" ? "#f85149" : "#3fb950";
   const shapes = [];
   for (const { i, j } of pairs) {
     for (const [a, b] of [[j, i], [i, j]]) {
@@ -998,14 +998,12 @@ function pairShapes(pairs) {
 
 function updatePairsInfo(pairs, syms) {
   const el = $("an-pairs");
-  const hl = $("an-hl").value;
-  const th = $("an-hl-th").value;
-  if (hl === "off") { el.textContent = ""; return; }
+  if (anHighlight === "off") { el.textContent = ""; return; }
   if (!pairs.length) {
-    el.textContent = `Нет пар с корреляцией ${hl === "ge" ? "≥" : "≤"} ${th} для выбранной метрики`;
+    el.textContent = `Нет пар с корреляцией ${anHighlight === "high" ? "≥ 0.7" : "≤ 0.3"} для выбранной метрики`;
     return;
   }
-  const sorted = [...pairs].sort((a, b) => (hl === "ge" ? b.v - a.v : a.v - b.v));
+  const sorted = [...pairs].sort((a, b) => (anHighlight === "high" ? b.v - a.v : a.v - b.v));
   const list = sorted.slice(0, 8).map((p) => `${syms[p.i]}↔${syms[p.j]} ${p.v.toFixed(2)}`);
   el.textContent = `Подсвечено пар: ${pairs.length}` +
     (pairs.length > 8 ? ` (топ-8): ${list.join(", ")} …` : `: ${list.join(", ")}`);
@@ -1035,7 +1033,6 @@ function renderAnalytics() {
     return;
   }
   const pairs = highlightPairs(d, metric);
-  $("an-hl-th").disabled = $("an-hl").value === "off";
   $("an-pairs").textContent = "";
   const lo = mode === "corr" ? -1 : Math.min(...cells);
   let hi = mode === "corr" ? 1 : Math.max(...cells);
@@ -1215,12 +1212,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("overlay-reset").addEventListener("click", resetOverlays);
   $("an-metric").addEventListener("change", () => { saveState(); renderAnalytics(); });
   $("an-mode").addEventListener("change", () => { saveState(); renderAnalytics(); });
-  $("an-hl").addEventListener("change", (e) => {
-    if (e.target.value !== "off") $("an-hl-th").value = e.target.value === "le" ? "0.2" : "0.8";
-    saveState();
+  const setHighlight = (mode) => {
+    anHighlight = anHighlight === mode ? "off" : mode;
+    $("an-hl-high").classList.toggle("active", anHighlight === "high");
+    $("an-hl-low").classList.toggle("active", anHighlight === "low");
     renderAnalytics();
-  });
-  $("an-hl-th").addEventListener("input", renderAnalytics);
+  };
+  $("an-hl-high").addEventListener("click", () => setHighlight("high"));
+  $("an-hl-low").addEventListener("click", () => setHighlight("low"));
   $("an-load-top20").addEventListener("click", loadTop20);
 
   setView(currentView);

@@ -273,7 +273,9 @@ footer {
   min-height: 640px;
 }
 #an-pairs { font-size: 12px; opacity: 0.75; min-height: 1em; }
-#an-hl-th { width: 64px; }
+.an-hl-btn.active { cursor: pointer; }
+#an-hl-high.active { border-color: #3fb950; background: rgba(63, 185, 80, 0.15); }
+#an-hl-low.active { border-color: #f85149; background: rgba(248, 81, 73, 0.15); }
 .an-table-wrap {
   overflow-x: auto;
   background: var(--panel);
