@@ -989,7 +989,7 @@ function pairShapes(pairs) {
       shapes.push({
         type: "rect", xref: "x", yref: "y", layer: "above",
         x0: a - 0.5, x1: a + 0.5, y0: b - 0.5, y1: b + 0.5,
-        line: { color, width: 2 },
+        line: { color, width: 3 },
       });
     }
   }
@@ -1038,12 +1038,17 @@ function renderAnalytics() {
   let hi = mode === "corr" ? 1 : Math.max(...cells);
   if (hi <= lo) hi = lo + 1e-9;
   const annotations = [];
+  const match = new Set();
+  for (const { i, j } of pairs) { match.add(i + "," + j); match.add(j + "," + i); }
+  const dimCells = anHighlight !== "off" && pairs.length > 0;
   for (let i = 0; i < syms.length; i++) {
     for (let j = 0; j < syms.length; j++) {
       const v = z[i][j];
+      const bright = !dimCells || match.has(i + "," + j);
       annotations.push({
         x: syms[j], y: syms[i], text: fmtCell(v, mode),
-        showarrow: false, font: { size: syms.length > 14 ? 8 : 10, color: "#dbe2f0" },
+        showarrow: false,
+        font: { size: syms.length > 14 ? 8 : 10, color: bright ? "#dbe2f0" : "#5c6577" },
       });
     }
   }
@@ -1053,15 +1058,20 @@ function renderAnalytics() {
     funding: "Корреляция ставки фандинга",
   }[metric];
   if (!el.classList.contains("js-plotly-plot")) el.textContent = "";
-  Plotly.react(el, [{
-    x: syms, y: syms, z,
+  const heatBase = {
     type: "heatmap",
     colorscale: "RdBu", reversescale: true,
     zmin: lo, zmax: hi,
     xgap: 1, ygap: 1,
     hovertemplate: "%{y} ↔ %{x}<br>%{z:.4f}<extra></extra>",
-    colorbar: { title: mode === "cov" ? "cov" : "ρ", thickness: 12 },
-  }], {
+  };
+  const traces = dimCells
+    ? [
+        { ...heatBase, x: syms, y: syms, z: z.map((row, i) => row.map((v, j) => (match.has(i + "," + j) ? null : v))), opacity: 0.3, showscale: false },
+        { ...heatBase, x: syms, y: syms, z: z.map((row, i) => row.map((v, j) => (match.has(i + "," + j) ? v : null))), colorbar: { title: mode === "cov" ? "cov" : "ρ", thickness: 12 } },
+      ]
+    : [{ ...heatBase, x: syms, y: syms, z, colorbar: { title: mode === "cov" ? "cov" : "ρ", thickness: 12 } }];
+  Plotly.react(el, traces, {
     ...PLOT_LAYOUT,
     // heatmap — фиксированная матрица: оси fixedrange не дают ни зума, ни
     // рамки выделения (dragmode при этом остаётся рабочим для plotly_click)
