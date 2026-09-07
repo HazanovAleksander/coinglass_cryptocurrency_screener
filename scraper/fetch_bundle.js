@@ -77,6 +77,25 @@ function progress(i, n, name) {
       }, endpoint, params);
     }
 
+    // Binance quotes some coins only as 1000-quoted futures pairs
+    // (1000PEPEUSDT, 1000SHIBUSDT, …): try the plain USDT pair first, then
+    // the 1000-quoted one; for price klines rescale OHLC to per-unit prices
+    // (volume is a USD notional and is NOT rescaled; OI klines are already
+    // in USD and are not rescaled either). Returns null when both fail.
+    async function callBinanceKline(suffix, params, rescale) {
+      for (const base of [`Binance_${SYMBOL}USDT`, `Binance_1000${SYMBOL}USDT`]) {
+        const r = await call('/api/v2/kline', { ...params, symbol: `${base}${suffix}` });
+        if (r && !r.__err && Array.isArray(r.data) && r.data.length) {
+          if (rescale && base.startsWith('Binance_1000')) {
+            r.data = r.data.map((row) => row.map((v, j) =>
+              (j >= 1 && j <= 4) ? Number(v) / 1000 : v));
+          }
+          return r;
+        }
+      }
+      return null;
+    }
+
     const bundle = { symbol: SYMBOL, fetched_at: Math.floor(Date.now() / 1000), series: {} };
 
     if (SYMBOL === '_TOP20') {
@@ -88,8 +107,7 @@ function progress(i, n, name) {
       const stages = [
         ['funding', '/api/priceAndIndicator',
           { symbol: SYMBOL, interval: TIMEFRAME, index: 'avg_fr_kline', limit: LIMIT }],
-        ['oi_agg', '/api/v2/kline',
-          { symbol: `Binance_${SYMBOL}USDT#aggregated_oi_kline`, interval: TIMEFRAME, limit: LIMIT, minLimit: false }],
+        ['oi_agg', null, null],
         ['oi_by_exchange_hourly', '/api/openInterest/v3/chart',
           { symbol: SYMBOL, timeType: 2, exchangeName: '', currency: 'USD', type: 0 }],
         ['oi_by_exchange_daily', '/api/openInterest/v3/chart',
@@ -98,17 +116,26 @@ function progress(i, n, name) {
           { symbol: `ALL#${SYMBOL}#aggregated_buy_sell_usd`, interval: TIMEFRAME, limit: LIMIT, minLimit: false }],
         ['spot_buysell', '/api/v2/kline',
           { symbol: `ALL#${SYMBOL}#aggregated_spot_buy_sell_usd`, interval: TIMEFRAME, limit: LIMIT, minLimit: false }],
-        ['spot_price', '/api/v2/kline',
-          { symbol: `Binance_${SYMBOL}USDT#kline`, interval: TIMEFRAME, limit: LIMIT, minLimit: false }],
+        ['spot_price', null, null],
       ];
       const n = stages.length + 2;
       let i = 2;
       for (const [name, ep, params] of stages) {
         progress(i, n, name);
-        let r = await call(ep, params);
-        // The Binance kline above gives years of spot history at the native
-        // interval but only exists for coins with a Binance USDT pair; for the
-        // rest fall back to /api/price (capped at ~2000 h1 candles ≈ 83 days).
+        let r;
+        if (name === 'oi_agg') {
+          r = await callBinanceKline('#aggregated_oi_kline',
+            { interval: TIMEFRAME, limit: LIMIT, minLimit: false }, false);
+        } else if (name === 'spot_price') {
+          r = await callBinanceKline('#kline',
+            { interval: TIMEFRAME, limit: LIMIT, minLimit: false }, true);
+        } else {
+          r = await call(ep, params);
+        }
+        // The Binance klines above give years of spot history at the native
+        // interval but only exist for coins with a Binance (or 1000-quoted
+        // Binance) pair; for the rest fall back to /api/price (capped at
+        // ~2000 h1 candles ≈ 83 days).
         if (name === 'spot_price' && (!r || r.__err || !(Array.isArray(r.data) && r.data.length))) {
           r = await call('/api/price', { symbol: SYMBOL, interval: 'h1',
             limit: Math.min(LIMIT, 2000), minLimit: false });

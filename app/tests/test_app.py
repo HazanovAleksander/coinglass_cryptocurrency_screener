@@ -224,6 +224,37 @@ def test_normalize_bundle_d1_spot(client):
     assert b0["volume"] == 300000.0
 
 
+def test_normalize_bundle_1000_quoted_kline(client):
+    # 1000-quoted Binance klines (1000PEPEUSDT): the scraper rescales OHLC to
+    # per-unit floats and leaves the USD volume as a string; OI stays in USD
+    # (not rescaled) and padded leading rows carry nulls.
+    from app import fetcher, store
+    base = 1_683_504_000  # divisible by 86400
+    bundle = {
+        "symbol": "PEPE",
+        "series": {
+            "oi_agg": {"code": "0", "data": [
+                [base, None, None, None, None],
+                [base + 86400, 145493.513, 147736.61, 139823.734, 146034.157],
+            ]},
+            "spot_price": {"code": "0", "data": [
+                [base, 2.2799e-06, 2.3888e-06, 1.5351e-06, 1.9464e-06, "1770085624.6857"],
+                [base + 86400, 1.9464e-06, 2.1e-06, 1.9e-06, 2.05e-06, "165714069.5574592"],
+            ]},
+        },
+    }
+    counts = fetcher._normalize_bundle("PEPE", bundle, "d1")
+    assert counts["spot_price_d1"] == 2
+    assert counts["oi_agg_d1"] == 2
+    pts = dict(store.get_points("PEPE", "spot_price_d1"))
+    assert pts[base]["open"] == 2.2799e-06
+    assert pts[base]["close"] == 1.9464e-06
+    assert pts[base]["volume"] == 1770085624.6857
+    oi = dict(store.get_points("PEPE", "oi_agg_d1"))
+    assert oi[base]["close"] is None
+    assert oi[base + 86400]["close"] == 146034.157
+
+
 def test_job_registry(client):
     from app import fetcher
     job_id = fetcher._job_new("BTC")
