@@ -6,7 +6,7 @@
   <title>CoinGlass Dashboard</title>
   <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
-  <link rel="stylesheet" href="/static/styles.css?v=16">
+  <link rel="stylesheet" href="/static/styles.css?v=17">
 </head>
 <body>
   <header>
@@ -15,6 +15,7 @@
       <span class="view-tabs" id="view-tabs">
         <button id="tab-dashboard" class="tab-btn active" type="button">Дашборд</button>
         <button id="tab-analytics" class="tab-btn" type="button">Анализ</button>
+        <button id="tab-spreads" class="tab-btn" type="button">Спреды</button>
       </span>
       <span class="dash-only">
         <label for="coin-select">Монета:</label>
@@ -137,9 +138,28 @@
     </div>
     <p class="an-hint">Клик по ячейке — наложить монету из строки на монету из столбца в дашборде (нормировано в начале диапазона).</p>
   </section>
+  <section id="spread-view" class="hidden">
+    <div class="spread-controls">
+      <label>База:
+        <select id="spread-base"></select>
+      </label>
+      <button id="spread-swap" type="button" title="Поменять местами">⇄</button>
+      <label>Квота:
+        <select id="spread-quote"></select>
+      </label>
+      <button id="spread-refresh" type="button" title="Последовательно обновить данные обеих монет">Загрузить обе</button>
+      <span id="spread-info"></span>
+    </div>
+    <div class="chart-container wide">
+      <div id="chart-spread-price" class="chart"></div>
+    </div>
+    <div class="chart-container wide">
+      <div id="chart-spread-funding" class="chart"></div>
+    </div>
+  </section>
   <footer>
     <span id="meta-info"></span>
   </footer>
-  <script src="/static/app.js?v=51"></script>
+  <script src="/static/app.js?v=52"></script>
 </body>
 </html>

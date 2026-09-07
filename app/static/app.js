@@ -41,6 +41,10 @@ let overlaySymbols = [];
 let analyticsData = null;
 let analyticsKey = null;
 let anHighlight = "off";
+let spreadData = null;
+let spreadKey = null;
+let spreadBase = "BTC";
+let spreadQuote = "ETH";
 const _overlayFetched = new Set();
 
 const MAX_OVERLAYS = 5;
@@ -140,7 +144,8 @@ function applyPreset(key) {
   }
   $("date-from").value = from ? dateStr(from) : "";
   $("date-to").value = dateStr(today);
-  if (currentSymbol) drawDashboard(currentSymbol);
+  if (currentView === "spreads") drawSpread();
+  else if (currentSymbol) drawDashboard(currentSymbol);
   saveState();
 }
 
@@ -166,6 +171,8 @@ function saveState() {
       overlays: overlaySymbols,
       anMetric: $("an-metric") ? $("an-metric").value : "returns",
       anMode: $("an-mode") ? $("an-mode").value : "corr",
+      spreadBase: spreadBase,
+      spreadQuote: spreadQuote,
       exportCharts: EXPORT_CHART_IDS.map((c) => {
         const el = document.querySelector(`.chart-export[data-chart="${CSS.escape(c)}"]`);
         return el ? el.checked : false;
@@ -186,10 +193,12 @@ function loadState() {
     if (s.dateTo) $("date-to").value = s.dateTo;
     if (s.fetchLimit) fetchLimit = s.fetchLimit;
     if (s.layout) defaultLayout = s.layout;
-    if (s.view === "analytics") currentView = "analytics";
+    if (s.view === "analytics" || s.view === "spreads") currentView = s.view;
     if (Array.isArray(s.overlays)) overlaySymbols = s.overlays.filter((x) => typeof x === "string");
     else if (s.overlay) overlaySymbols = [s.overlay]; // migrate old single-overlay state
     overlaySymbols = overlaySymbols.slice(0, MAX_OVERLAYS);
+    if (typeof s.spreadBase === "string") spreadBase = s.spreadBase;
+    if (typeof s.spreadQuote === "string") spreadQuote = s.spreadQuote;
     if (s.anMetric && $("an-metric")) $("an-metric").value = s.anMetric;
     if (s.anMode && $("an-mode")) $("an-mode").value = s.anMode;
     if (Array.isArray(s.unitOrder)) reorderUnits(s.unitOrder);
@@ -224,6 +233,9 @@ const SYNC_CHARTS = [
   "chart-cvd-spot", "chart-cvd-fut", "chart-price",
   "chart-vol-history",
 ];
+
+// Spreads tab: its own pair of charts, X-synced between themselves only.
+const SPREAD_CHARTS = ["chart-spread-price", "chart-spread-funding"];
 
 // ------------------------------------------------------------- layout
 
@@ -728,14 +740,14 @@ function renderVolHistoryChart({ symbol, x, rvAnn }) {
 // (to the X axis) on every other chart in SYNC_CHARTS at the same date.
 let _hoverSyncing = false;
 
-function wireHoverSync(chartId) {
+function wireHoverSync(chartId, group = SYNC_CHARTS) {
   const el = $(chartId);
   if (!el || typeof el.on !== "function") return;
   if (el.dataset.hoverSyncWired) return;
   el.dataset.hoverSyncWired = "1";
 
   const broadcast = (xms) => {
-    for (const id of SYNC_CHARTS) {
+    for (const id of group) {
       if (id === chartId) continue;
       const other = $(id);
       if (other) Plotly.Fx.hover(other, xms === null ? [] : [{ curveNumber: 0, xval: xms }]);
@@ -767,12 +779,12 @@ function wireHoverSync(chartId) {
   });
 }
 
-function wireLinkedZoom(chartId) {
+function wireLinkedZoom(chartId, group = SYNC_CHARTS) {
   const el = $(chartId);
   if (!el || typeof el.on !== "function") return;
   el.on("plotly_relayout", async (ed) => {
     if (_syncing || !ed) return;
-    const others = SYNC_CHARTS.filter((id) => id !== chartId).map($).filter(Boolean);
+    const others = group.filter((id) => id !== chartId).map($).filter(Boolean);
     _syncing = true;
     try {
       if (ed["xaxis.autorange"]) {
@@ -871,16 +883,26 @@ async function doExport(fmt) {
 
 function setView(v) {
   currentView = v;
-  $("tab-dashboard").classList.toggle("active", v === "dashboard");
-  $("tab-analytics").classList.toggle("active", v === "analytics");
+  for (const [tab, view] of [["tab-dashboard", "dashboard"],
+                             ["tab-analytics", "analytics"],
+                             ["tab-spreads", "spreads"]]) {
+    $(tab).classList.toggle("active", view === v);
+  }
   document.querySelector("main").toggleAttribute("hidden", v !== "dashboard");
-  $("analytics-view").classList.toggle("hidden", v === "dashboard");
+  $("analytics-view").classList.toggle("hidden", v !== "analytics");
+  $("spread-view").classList.toggle("hidden", v !== "spreads");
   document.querySelectorAll(".dash-only").forEach((el) =>
     el.toggleAttribute("hidden", v !== "dashboard"));
   if (v === "analytics") {
     ensureAnalytics();
     if ($("an-heatmap").classList.contains("js-plotly-plot"))
       Plotly.Plots.resize($("an-heatmap"));
+  } else if (v === "spreads") {
+    ensureSpread();
+    for (const id of SPREAD_CHARTS) {
+      const el = $(id);
+      if (el && el.classList.contains("js-plotly-plot")) Plotly.Plots.resize(el);
+    }
   } else {
     applyLayout(defaultLayout); // resize charts back after display:none
   }
@@ -1105,6 +1127,139 @@ async function loadTop20() {
   await loadAnalytics();
 }
 
+// ------------------------------------------------------------- spreads tab
+
+function populateSpreadSelects() {
+  const list = _coinList.length ? _coinList.map((c) => c.symbol) : ["BTC"];
+  const fill = (sel, val, other) => {
+    sel.innerHTML = "";
+    for (const s of list) {
+      const opt = document.createElement("option");
+      opt.value = s;
+      opt.textContent = s;
+      sel.appendChild(opt);
+    }
+    sel.value = list.includes(val) && val !== other
+      ? val : (list.find((s) => s !== other) || val);
+  };
+  fill($("spread-base"), spreadBase, spreadQuote);
+  fill($("spread-quote"), spreadQuote, spreadBase);
+  spreadBase = $("spread-base").value;
+  spreadQuote = $("spread-quote").value;
+}
+
+function ensureSpread() {
+  const key = `${spreadBase}/${spreadQuote}?${rangeParams().toString()}`;
+  if (!spreadData || spreadKey !== key) drawSpread();
+}
+
+async function drawSpread() {
+  const base = spreadBase, quote = spreadQuote;
+  spreadKey = `${base}/${quote}?${rangeParams().toString()}`;
+  const info = $("spread-info");
+  info.textContent = "Загрузка…";
+  try {
+    spreadData = await jget(withRange(
+      `/api/spread/${encodeURIComponent(base)}/${encodeURIComponent(quote)}?limit=${maxFetchLimit}`));
+  } catch (e) {
+    info.textContent = "Ошибка спредов: " + (e && e.message ? e.message : e);
+    return;
+  }
+  renderSpreadCharts(spreadData);
+  const uncached = ["base", "quote"].filter((k) => !spreadData.cached?.[k]);
+  info.textContent = uncached.length
+    ? `Нет кэша для ${uncached.map((k) => spreadData[k]).join(", ")} — нажмите «Загрузить обе»`
+    : `Пересечение данных: цены ${spreadData.ratio_stats.days} дн · фандинг ${spreadData.diff_stats.days} дн`;
+}
+
+function spreadRatioLegend(pts) {
+  if (!pts.length) return "";
+  const vals = pts.map((p) => p.ratio);
+  return ` · тек ${vals[vals.length - 1].toFixed(4)}` +
+    ` · мин ${Math.min(...vals).toFixed(4)} · макс ${Math.max(...vals).toFixed(4)}`;
+}
+
+function spreadDiffLegend(pts) {
+  if (!pts.length) return "";
+  const mean = pts.reduce((a, p) => a + p.diff, 0) / pts.length;
+  const sum = mean * pts.length;
+  const fmt = (v) => (v >= 0 ? "+" : "") + v.toFixed(4);
+  return ` · ср ${fmt(mean)}%/д · Σ ${fmt(sum)}%`;
+}
+
+function renderSpreadCharts(d) {
+  const ratio = d.price_ratio || [];
+  const diff = d.funding_diff || [];
+  const tsAll = [...ratio.map((p) => p.ts), ...diff.map((p) => p.ts)];
+  const tMin = tsAll.length ? Math.min(...tsAll) : 0;
+  const tMax = tsAll.length ? Math.max(...tsAll) : 1;
+  const sharedX = { ...PLOT_LAYOUT.xaxis, type: "date",
+    range: [new Date(tMin * 1000), new Date(tMax * 1000)], autorange: false };
+
+  const elP = $("chart-spread-price");
+  if (!ratio.length) {
+    if (!elP.classList.contains("js-plotly-plot"))
+      elP.textContent = "Нет данных: отношение цен — обновите обе монеты";
+  } else {
+    Plotly.react(elP, [{
+      x: ratio.map((p) => new Date(p.ts * 1000)), y: ratio.map((p) => p.ratio),
+      type: "scatter", mode: "lines", name: `${d.base}/${d.quote}`,
+      line: { color: BASE_COLOR, width: 1.8 },
+    }], {
+      ...PLOT_LAYOUT,
+      title: `${d.base}/${d.quote} · отношение цен (1d)${spreadRatioLegend(ratio)}`,
+      xaxis: sharedX,
+      yaxis: { ...PLOT_LAYOUT.yaxis, title: "цена базы / цена квоты" },
+    }, PLOT_CFG);
+  }
+
+  const elF = $("chart-spread-funding");
+  if (!diff.length) {
+    if (!elF.classList.contains("js-plotly-plot"))
+      elF.textContent = "Нет данных: спред фандинга — обновите обе монеты";
+  } else {
+    Plotly.react(elF, [{
+      x: diff.map((p) => new Date(p.ts * 1000)), y: diff.map((p) => p.diff),
+      type: "scatter", mode: "lines", name: `${d.base} − ${d.quote}`,
+      line: { color: "#3fbf6f", width: 1.5 },
+      fill: "tozeroy", fillcolor: "rgba(63,191,111,0.10)",
+    }], {
+      ...PLOT_LAYOUT,
+      title: `${d.base} − ${d.quote} · спред фандинга, %/д (1d)${spreadDiffLegend(diff)}`,
+      xaxis: sharedX,
+      yaxis: { ...PLOT_LAYOUT.yaxis, title: "%/д" },
+      shapes: [{
+        type: "line", xref: "paper", yref: "y", x0: 0, x1: 1, y0: 0, y1: 0,
+        line: { color: "#7e8aa8", width: 1, dash: "dot" },
+      }],
+    }, PLOT_CFG);
+  }
+
+  for (const chartId of SPREAD_CHARTS) {
+    wireLinkedZoom(chartId, SPREAD_CHARTS);
+    wireHoverSync(chartId, SPREAD_CHARTS);
+  }
+}
+
+// Последовательно загрузить обе монеты пары в кэш, затем перерисовать спреды.
+async function loadSpreadPair() {
+  const btn = $("spread-refresh");
+  btn.disabled = true;
+  const pair = [spreadBase, spreadQuote];
+  for (let i = 0; i < pair.length; i++) {
+    const sym = pair[i];
+    setStatus(`Загрузка спреда: ${sym} (${i + 1}/${pair.length})`, i / pair.length, false);
+    try {
+      const job = await jget(`/api/refresh/${encodeURIComponent(sym)}`, { method: "POST" });
+      if (job.state === "running" && job.id) await waitJobDone(job.id);
+    } catch (_e) { /* keep going */ }
+  }
+  btn.disabled = false;
+  setStatus("Готово", 1, false);
+  setTimeout(hideStatus, 1500);
+  drawSpread();
+}
+
 // ------------------------------------------------------------- wiring
 
 async function switchSymbol(symbol) {
@@ -1118,6 +1273,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadCoins();
   await loadFetchLimit();
   loadState();
+  populateSpreadSelects();
   applyLimitUI();
   applyLayout(defaultLayout);
 
@@ -1127,6 +1283,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const onDateChange = debounce(() => {
     if (currentView === "analytics") ensureAnalytics();
+    else if (currentView === "spreads") ensureSpread();
     else if (currentSymbol) drawDashboard(currentSymbol);
     saveState();
   }, 150);
@@ -1160,6 +1317,27 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   $("tab-dashboard").addEventListener("click", () => setView("dashboard"));
   $("tab-analytics").addEventListener("click", () => setView("analytics"));
+  $("tab-spreads").addEventListener("click", () => setView("spreads"));
+  $("spread-base").addEventListener("change", (e) => {
+    spreadBase = e.target.value;
+    spreadData = null;
+    drawSpread();
+    saveState();
+  });
+  $("spread-quote").addEventListener("change", (e) => {
+    spreadQuote = e.target.value;
+    spreadData = null;
+    drawSpread();
+    saveState();
+  });
+  $("spread-swap").addEventListener("click", () => {
+    [spreadBase, spreadQuote] = [spreadQuote, spreadBase];
+    populateSpreadSelects();
+    spreadData = null;
+    drawSpread();
+    saveState();
+  });
+  $("spread-refresh").addEventListener("click", loadSpreadPair);
   $("overlay-coin").addEventListener("change", (e) => {
     const sym = e.target.value;
     if (sym) addOverlay(sym);

@@ -1062,6 +1062,138 @@ def test_analytics_invalid_range_422(client):
     assert r.status_code == 422
 
 
+# ------------------------------------------------------------------ spreads
+
+SP_BASE = 1_700_000_000
+SP_DAY = 86400
+
+
+def _seed_spread():
+    """BTC close [100,110,120,0] (last day untradeable), ETH [50,55,60,70];
+    funding fully overlapping -> ratio skips the zero day, diff covers all 4."""
+    from app import store
+    store.upsert_points("BTC", "spot_price_d1", [
+        (SP_BASE + i * SP_DAY, {"open": c, "high": c, "low": c, "close": c})
+        for i, c in enumerate([100.0, 110.0, 120.0, 0.0])])
+    store.upsert_points("ETH", "spot_price_d1", [
+        (SP_BASE + i * SP_DAY, {"open": c, "high": c, "low": c, "close": c})
+        for i, c in enumerate([50.0, 55.0, 60.0, 70.0])])
+    store.upsert_points("BTC", "funding_d1", [
+        (SP_BASE + i * SP_DAY, {"close": f})
+        for i, f in enumerate([0.01, 0.02, 0.03, 0.04])])
+    store.upsert_points("ETH", "funding_d1", [
+        (SP_BASE + i * SP_DAY, {"close": f})
+        for i, f in enumerate([0.005, 0.01, 0.015, 0.01])])
+
+
+def test_spread_pure_function(client):
+    from app import analytics
+    base = {0: 100.0, 86400: 110.0, 172800: 120.0, 259200: 0.0, 345600: 130.0}
+    quote = {0: 50.0, 86400: 55.0, 259200: 65.0, 345600: -1.0}
+    bf = {0: 0.01, 86400: 0.02, 172800: 0.01}
+    qf = {0: 0.005, 86400: 0.01, 172800: 0.015}
+    out = analytics.build_spread(base, quote, bf, qf)
+    # ratio: intersection where both > 0 -> day 0 and 1 only
+    assert out["price_ratio"] == [
+        {"ts": 0, "ratio": pytest.approx(2.0)},
+        {"ts": 86400, "ratio": pytest.approx(2.0)},
+    ]
+    assert out["ratio_stats"] == {"days": 2, "from_ts": 0, "to_ts": 86400}
+    # diff: intersection of funding dicts (days 0, 1, 2)
+    assert out["funding_diff"] == [
+        {"ts": 0, "diff": pytest.approx(0.005)},
+        {"ts": 86400, "diff": pytest.approx(0.01)},
+        {"ts": 172800, "diff": pytest.approx(-0.005)},
+    ]
+    assert out["diff_stats"]["days"] == 3
+    assert analytics.build_spread({}, {}, {}, {}) == {
+        "price_ratio": [], "funding_diff": [],
+        "ratio_stats": {"days": 0, "from_ts": None, "to_ts": None},
+        "diff_stats": {"days": 0, "from_ts": None, "to_ts": None},
+    }
+
+
+def test_spread_api(client):
+    _seed_spread()
+    r = client.get("/api/spread/btc/eth")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["base"] == "BTC" and b["quote"] == "ETH" and b["timeframe"] == "d1"
+    assert b["cached"] == {"base": True, "quote": True}
+    # zero BTC close on day 3 is excluded from the ratio, funding is not
+    assert [p["ts"] for p in b["price_ratio"]] == [
+        SP_BASE, SP_BASE + SP_DAY, SP_BASE + 2 * SP_DAY]
+    assert all(p["ratio"] == pytest.approx(2.0) for p in b["price_ratio"])
+    assert [p["diff"] for p in b["funding_diff"]] == \
+        [pytest.approx(v) for v in (0.005, 0.01, 0.015, 0.03)]
+    assert b["ratio_stats"]["days"] == 3 and b["diff_stats"]["days"] == 4
+
+
+def test_spread_api_window_and_limit(client):
+    _seed_spread()
+    r = client.get(f"/api/spread/BTC/ETH?from_ts={SP_BASE + SP_DAY}")
+    b = r.json()
+    assert [p["ts"] for p in b["price_ratio"]] == [SP_BASE + SP_DAY, SP_BASE + 2 * SP_DAY]
+    assert len(b["funding_diff"]) == 3
+    # separate 15-day linear seed: ratio is flat 0.5, funding diff flat 0.005
+    from app import store
+    n = 15
+    store.upsert_points("BTC", "spot_price_d1", [
+        (SP_BASE + i * SP_DAY, {"close": float(i + 1)}) for i in range(n)])
+    store.upsert_points("ETH", "spot_price_d1", [
+        (SP_BASE + i * SP_DAY, {"close": 2.0 * (i + 1)}) for i in range(n)])
+    store.upsert_points("BTC", "funding_d1", [
+        (SP_BASE + i * SP_DAY, {"close": 0.01 + 0.001 * (i % 5)}) for i in range(n)])
+    store.upsert_points("ETH", "funding_d1", [
+        (SP_BASE + i * SP_DAY, {"close": 0.005 + 0.001 * (i % 5)}) for i in range(n)])
+    r = client.get("/api/spread/BTC/ETH?limit=10")
+    b = r.json()
+    # limit keeps the most recent aligned points per series
+    assert [p["ts"] for p in b["price_ratio"]] == [
+        SP_BASE + i * SP_DAY for i in range(5, n)]
+    assert all(p["ratio"] == pytest.approx(0.5) for p in b["price_ratio"])
+    assert [p["ts"] for p in b["funding_diff"]] == [
+        SP_BASE + i * SP_DAY for i in range(5, n)]
+    assert all(p["diff"] == pytest.approx(0.005) for p in b["funding_diff"])
+
+
+def test_spread_api_errors_and_empty(client):
+    r = client.get("/api/spread/BTC/BTC")
+    assert r.status_code == 422
+    r = client.get(f"/api/spread/BTC/ETH?from_ts={SP_BASE + 1}&to_ts={SP_BASE}")
+    assert r.status_code == 422
+    r = client.get("/api/spread/XRP/PEPE")
+    assert r.status_code == 200
+    b = r.json()
+    assert b["price_ratio"] == [] and b["funding_diff"] == []
+    assert b["cached"] == {"base": False, "quote": False}
+
+
+def test_cli_spread_json(cache_env, capsys):
+    from app import cli
+    _seed_spread()
+    assert cli.main(["spread", "btc", "eth", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["base"] == "BTC" and data["quote"] == "ETH"
+    assert len(data["price_ratio"]) == 3
+    assert data["funding_diff"][0]["diff"] == pytest.approx(0.005)
+
+
+def test_cli_spread_pretty_and_errors(cache_env, capsys):
+    from app import cli
+    _seed_spread()
+    assert cli.main(["spread", "BTC", "ETH"]) == 0
+    out = capsys.readouterr().out
+    lines = out.strip().splitlines()
+    assert "BTC/ETH" in lines[0] and "funding" in lines[0]
+    assert lines[1].startswith("--")
+    assert len(lines) == 2 + 4  # header + separator + one row per union ts
+    assert cli.main(["spread", "BTC", "BTC"]) == 2
+    assert "base and quote must differ" in capsys.readouterr().err
+    assert cli.main(["spread", "XRP", "PEPE"]) == 1
+    assert "no cached data" in capsys.readouterr().err
+
+
 def test_top20_filters_stables_and_extras(client):
     from app import fetcher, store
     store.set_meta("top20", [

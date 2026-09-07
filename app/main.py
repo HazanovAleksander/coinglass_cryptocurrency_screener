@@ -131,6 +131,35 @@ def api_price(
             "funding": [{"ts": ts, "close": vals.get("close")} for ts, vals in fund]}
 
 
+@app.get("/api/spread/{base}/{quote}")
+def api_spread(
+    base: str,
+    quote: str,
+    limit: int = Query(500, ge=10, le=10000),
+    from_ts: int | None = Query(None, ge=0),
+    to_ts: int | None = Query(None, ge=0),
+):
+    """Cross-coin spreads: price ratio base/quote and funding diff base−quote,
+    computed from the cached d1 spot_price/funding series of both coins."""
+    base, quote = base.upper(), quote.upper()
+    if base == quote:
+        raise HTTPException(422, "base and quote must differ")
+    _validate_range(from_ts, to_ts)
+
+    def series(sym: str, name: str) -> dict[int, float]:
+        return analytics.series_closes(store.get_points(
+            sym, store.resolve_series(name), limit=limit,
+            from_ts=from_ts, to_ts=to_ts))
+
+    out = {"base": base, "quote": quote, "timeframe": "d1",
+           "cached": {"base": bool(store.symbol_stats(base)),
+                      "quote": bool(store.symbol_stats(quote))}}
+    out.update(analytics.build_spread(
+        series(base, "spot_price"), series(quote, "spot_price"),
+        series(base, "funding"), series(quote, "funding")))
+    return out
+
+
 @app.get("/api/analytics/correlations")
 def api_analytics_correlations(
     limit: int = Query(10000, ge=10, le=50000),

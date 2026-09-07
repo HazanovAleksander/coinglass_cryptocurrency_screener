@@ -92,6 +92,45 @@ def beta(xs: list[float], ys: list[float]) -> float | None:
     return sum(a * b for a, b in zip(dx, dy)) / sxx
 
 
+def price_ratio(base: dict[int, float], quote: dict[int, float]) -> list[dict]:
+    """Base/quote price ratio over ts where both closes exist and are > 0."""
+    return [{"ts": ts, "ratio": base[ts] / quote[ts]}
+            for ts in sorted(set(base) & set(quote))
+            if base[ts] > 0 and quote[ts] > 0]
+
+
+def funding_diff(base: dict[int, float], quote: dict[int, float]) -> list[dict]:
+    """Funding spread base − quote (per-day) over shared ts."""
+    return [{"ts": ts, "diff": base[ts] - quote[ts]}
+            for ts in sorted(set(base) & set(quote))]
+
+
+def build_spread(
+    base_closes: dict[int, float],
+    quote_closes: dict[int, float],
+    base_funding: dict[int, float],
+    quote_funding: dict[int, float],
+) -> dict:
+    """Spread report for a coin pair: price ratio A/B and funding diff A−B,
+    each aligned on the intersection of its series' daily ts."""
+    ratio = price_ratio(base_closes, quote_closes)
+    diff = funding_diff(base_funding, quote_funding)
+    return {
+        "price_ratio": ratio,
+        "funding_diff": diff,
+        "ratio_stats": {
+            "days": len(ratio),
+            "from_ts": ratio[0]["ts"] if ratio else None,
+            "to_ts": ratio[-1]["ts"] if ratio else None,
+        },
+        "diff_stats": {
+            "days": len(diff),
+            "from_ts": diff[0]["ts"] if diff else None,
+            "to_ts": diff[-1]["ts"] if diff else None,
+        },
+    }
+
+
 def _sym_matrix(n: int) -> list[list]:
     return [[None] * n for _ in range(n)]
 

@@ -296,6 +296,22 @@ footer {
 #an-table th:first-child, #an-table td:first-child { text-align: left; }
 #an-table tbody tr:hover { background: #202a41; }
 .an-hint { margin: 0; font-size: 12px; opacity: 0.6; }
+#spread-view {
+  display: grid;
+  gap: 14px;
+  padding: 14px 20px;
+}
+#spread-view.hidden { display: none; }
+.spread-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  opacity: 0.9;
+}
+.spread-controls label { display: inline-flex; align-items: center; gap: 6px; }
+#spread-info { opacity: 0.7; }
 @media (max-width: 1100px) {
   main.layout-2, main.layout-1, main.layout-3 { grid-template-columns: 1fr; }
 }

@@ -4,7 +4,8 @@ Usage::
 
     python -m app <command> [options]
 
-Commands: coins, refresh, stats, dashboard, table, price, analytics, export.
+Commands: coins, refresh, stats, dashboard, table, price, spread, analytics,
+export.
 Reads the SQLite cache; ``refresh`` (and ``coins`` on a cache miss) run the
 Node scraper. The dashboard is daily-only; Google Sheets export stays
 web-only (OAuth browser flow).
@@ -249,6 +250,37 @@ def cmd_price(args) -> int:
     return 0
 
 
+def cmd_spread(args) -> int:
+    base, quote = args.base.upper(), args.quote.upper()
+    if base == quote:
+        raise CliError("base and quote must differ", code=2)
+    from_ts, to_ts = _window(args)
+
+    def series(sym: str, name: str) -> dict[int, float]:
+        return analytics.series_closes(store.get_points(
+            sym, store.resolve_series(name),
+            limit=args.limit, from_ts=from_ts, to_ts=to_ts))
+
+    out = {"base": base, "quote": quote, "timeframe": "d1",
+           "cached": {"base": bool(store.symbol_stats(base)),
+                      "quote": bool(store.symbol_stats(quote))}}
+    out.update(analytics.build_spread(
+        series(base, "spot_price"), series(quote, "spot_price"),
+        series(base, "funding"), series(quote, "funding")))
+    if args.json:
+        _emit_json(out)
+        return 0
+    if not out["price_ratio"] and not out["funding_diff"]:
+        raise CliError(f"no cached data for {base}/{quote}; "
+                       f"run: python -m app refresh {base} and {quote}")
+    ratio = {p["ts"]: p["ratio"] for p in out["price_ratio"]}
+    diff = {p["ts"]: p["diff"] for p in out["funding_diff"]}
+    _emit_table(["datetime", f"{base}/{quote}", f"{base}-{quote} funding"],
+                [[_iso(ts), _num(ratio.get(ts)), _num(diff.get(ts))]
+                 for ts in sorted(set(ratio) | set(diff))])
+    return 0
+
+
 def cmd_analytics(args) -> int:
     from_ts, to_ts = _window(args)
     top = [c["symbol"] for c in fetcher.get_top20()]
@@ -396,6 +428,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_window(sp, 500)
     _add_json(sp)
     sp.set_defaults(func=cmd_price)
+
+    sp = sub.add_parser("spread",
+                        help="price ratio A/B + funding diff A−B (as /api/spread)")
+    sp.add_argument("base", help="base coin symbol, e.g. BTC")
+    sp.add_argument("quote", help="quote coin symbol, e.g. ETH")
+    _add_window(sp, 500)
+    _add_json(sp)
+    sp.set_defaults(func=cmd_spread)
 
     sp = sub.add_parser("analytics",
                         help="cross-coin correlations (as /api/analytics/correlations)")
