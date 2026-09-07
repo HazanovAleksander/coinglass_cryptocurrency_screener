@@ -427,61 +427,7 @@ function trimLeadingZeroBuySell(pts) {
   return i ? pts.slice(i) : pts;
 }
 
-// Simple 1D k-means (k=3) on a sorted-by-time series to find stable low/normal/
-// high volatility regimes. Returns array of cluster labels (0=low,1=normal,2=high)
-// aligned to input order. Falls back to nearest-mean assignment.
-function kmeans3(x) {
-  const arr = x.map((v) => (isFinite(v) ? v : 0));
-  if (arr.length === 0) return [];
-  const lo = Math.min(...arr), hi = Math.max(...arr);
-  if (lo === hi) return arr.map(() => 1);
-  // init centroids spread over [lo, hi]
-  let c = [lo + (hi - lo) * 0.15, lo + (hi - lo) * 0.5, lo + (hi - lo) * 0.85];
-  let labels = arr.map(() => 1);
-  for (let iter = 0; iter < 25; iter++) {
-    labels = arr.map((v) => {
-      let best = 0, bd = Infinity;
-      for (let k = 0; k < 3; k++) {
-        const d = (v - c[k]) ** 2;
-        if (d < bd) { bd = d; best = k; }
-      }
-      return best;
-    });
-    const sums = [0, 0, 0], cnts = [0, 0, 0];
-    arr.forEach((v, i) => { sums[labels[i]] += v; cnts[labels[i]] += 1; });
-    const nc = c.map((_old, k) => (cnts[k] ? sums[k] / cnts[k] : c[k]));
-    if (nc.every((v, k) => Math.abs(v - c[k]) < 1e-9)) { c = nc; break; }
-    c = nc;
-  }
-  // enforce ascending so 0=low,1=normal,2=high
-  const order = [0, 1, 2].sort((a, b) => c[a] - c[b]);
-  const remap = {};
-  order.forEach((orig, rank) => { remap[orig] = rank; });
-  return labels.map((l) => remap[l]);
-}
-
-// Convert a per-bar series (aligned with pts) to regime background shapes,
-// one rect per contiguous run. `x` is array of Dates.
-function regimeBands(pts, rv) {
-  const labels = kmeans3(rv);
-  const bands = [];
-  let runStart = 0;
-  for (let i = 1; i <= labels.length; i++) {
-    if (i === labels.length || labels[i] !== labels[runStart]) {
-      const z = labels[runStart];
-      const color = z === 0 ? "#3fbf6f" : z === 1 ? "#f5b942" : "#e05555";
-      bands.push({
-        type: "rect", xref: "x", yref: "paper",
-        x0: pts[runStart].ts * 1000, x1: (pts[i === labels.length ? i - 1 : i].ts + 1) * 1000,
-        y0: 0, y1: 1, fillcolor: color, opacity: 0.09, line: { width: 0 }, layer: "below",
-      });
-      runStart = i;
-    }
-  }
-  return bands;
-}
-
-// Historic realized volatility (annualized) of the selected coin + regime clustering.
+// Historic realized volatility (annualized) of the selected coin.
 async function drawVolHistory(symbol) {
   const el = $("chart-vol-history");
   if (!el) return;
@@ -508,8 +454,7 @@ async function drawVolHistory(symbol) {
     }
     const x = pts.slice(RET_WIN).map((p) => new Date(p.ts * 1000));
     const rvAnn = rv.map((r) => r * Math.sqrt(365) * 100);
-    const bands = regimeBands(pts.slice(RET_WIN), rv);
-    renderVolHistoryChart({ symbol, x, rvAnn, bands });
+    renderVolHistoryChart({ symbol, x, rvAnn });
   } catch (e) {
     console.error("[drawVolHistory]", e);
     el.textContent = "Ошибка исторической волатильности: " + (e && e.message ? e.message : e);
@@ -629,7 +574,7 @@ async function drawDashboard(symbol) {
     ? `Последнее обновление: ${new Date(lf.ts * 1000).toLocaleString()} · кэш: SQLite`
     : "Нет закэшированных данных — нажмите «Обновить данные»";
 
-  // Историческая волатильность выбранной монеты + кластеризация режимов
+  // Историческая волатильность выбранной монеты
   await drawVolHistory(symbol);
 
   // Linked zoom: все графики на единой дневной оси X выбранной монеты.
@@ -763,7 +708,7 @@ function waitJobDone(jobId, timeoutMs = 900000) {
   });
 }
 
-function renderVolHistoryChart({ symbol, x, rvAnn, bands }) {
+function renderVolHistoryChart({ symbol, x, rvAnn }) {
   const traces = [
     {
       x, y: rvAnn, type: "scatter", mode: "lines", name: "RV (realized, ann. %)",
@@ -773,9 +718,8 @@ function renderVolHistoryChart({ symbol, x, rvAnn, bands }) {
   ];
   Plotly.react("chart-vol-history", traces, {
     ...PLOT_LAYOUT,
-    title: `${symbol} · Историческая волатильность + кластеризация режимов`,
+    title: `${symbol} · Историческая волатильность`,
     xaxis: { ...PLOT_LAYOUT.xaxis, type: "date" },
-    shapes: bands,
     yaxis: { ...PLOT_LAYOUT.yaxis, title: "RV, % годовых" },
   }, PLOT_CFG);
 }
